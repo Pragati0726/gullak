@@ -39,7 +39,7 @@ class _HomeScreenState extends State<HomeScreen> {
       backgroundColor: AppColors.background,
       appBar: AppBar(
         title: const Text(
-          'My Gullak',
+          'Gullak',
           style: TextStyle(fontWeight: FontWeight.w700),
         ),
         centerTitle: true,
