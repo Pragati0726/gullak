@@ -51,7 +51,7 @@ class SavingsCard extends StatelessWidget {
                 TweenAnimationBuilder<int>(
                   tween: IntTween(begin: 0, end: total),
                   duration: const Duration(milliseconds: 400),
-                  builder: (_, value, __) => Text(
+                  builder: (_, value, _) => Text(
                     '₹ $value',
                     style: const TextStyle(
                       fontSize: 38,
