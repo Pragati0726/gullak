@@ -4,7 +4,9 @@ import 'package:gullak/models/coin.dart';
 import 'package:gullak/utils/constants.dart';
 import 'package:gullak/widgets/coin_tray.dart';
 import 'package:gullak/widgets/gullak_target.dart';
+import 'package:gullak/widgets/members_panel.dart';
 import 'package:gullak/widgets/savings_card.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../main.dart';
 import 'auth_gate.dart';
 
@@ -19,6 +21,7 @@ class _HomeScreenState extends State<HomeScreen> {
   int total = 0;
   int count = 0;
   String username = '';
+  int _syncTick = 0; // bumps after each Supabase save -> refreshes team panel
 
   @override
   void initState() {
@@ -75,9 +78,61 @@ class _HomeScreenState extends State<HomeScreen> {
         'coins_count': updatedCoins,
         'updated_at': DateTime.now().toIso8601String(),
       });
+      if (mounted) setState(() => _syncTick++);
     } catch (e) {
       debugPrint('Supabase sync error: $e');
     }
+  }
+
+  Future<void> _editUsername() async {
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (_) => _UsernameDialog(initial: username),
+    );
+    if (newName == null || newName == username) return;
+
+    final user = supabase.auth.currentUser;
+    if (user == null) return;
+
+    String? error;
+    try {
+      final updated = await supabase
+          .from('profiles')
+          .update({'username': newName})
+          .eq('id', user.id)
+          .select();
+
+      if ((updated as List).isEmpty) {
+        error = 'Update blocked. Add the update policy in Supabase.';
+      } else {
+        // keep auth metadata in sync (non-critical)
+        try {
+          await supabase.auth
+              .updateUser(UserAttributes(data: {'username': newName}));
+        } catch (e) {
+          debugPrint('Metadata update error: $e');
+        }
+      }
+    } on PostgrestException catch (e) {
+      debugPrint('Username update error: $e');
+      error = e.code == '23505'
+          ? 'That username is already taken'
+          : 'Could not update username';
+    } catch (e) {
+      debugPrint('Username update error: $e');
+      error = 'Could not update username';
+    }
+
+    if (!mounted) return;
+    if (error == null) {
+      setState(() {
+        username = newName;
+        _syncTick++; // refresh team panel
+      });
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(error ?? 'Username updated')),
+    );
   }
 
   void _addCoin(Coin coin) {
@@ -141,6 +196,11 @@ class _HomeScreenState extends State<HomeScreen> {
         foregroundColor: AppColors.brown,
         actions: [
           IconButton(
+            icon: const Icon(Icons.edit_outlined),
+            tooltip: 'Edit username',
+            onPressed: _editUsername,
+          ),
+          IconButton(
             icon: const Icon(Icons.logout),
             tooltip: 'Log Out',
             onPressed: _logOut,
@@ -156,8 +216,13 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 16),
               Expanded(
                 child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    MembersPanel(
+                      currentUserId: supabase.auth.currentUser?.id,
+                      refreshKey: _syncTick,
+                    ),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -183,6 +248,69 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _UsernameDialog extends StatefulWidget {
+  final String initial;
+  const _UsernameDialog({required this.initial});
+
+  @override
+  State<_UsernameDialog> createState() => _UsernameDialogState();
+}
+
+class _UsernameDialogState extends State<_UsernameDialog> {
+  late final TextEditingController _controller =
+      TextEditingController(text: widget.initial);
+  final _formKey = GlobalKey<FormState>();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    if (_formKey.currentState!.validate()) {
+      Navigator.pop(context, _controller.text.trim());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppColors.background,
+      title: const Text(
+        'Update username',
+        style: TextStyle(color: AppColors.brown, fontWeight: FontWeight.w700),
+      ),
+      content: Form(
+        key: _formKey,
+        child: TextFormField(
+          controller: _controller,
+          autofocus: true,
+          maxLength: 20,
+          decoration: const InputDecoration(
+            labelText: 'Username',
+            border: OutlineInputBorder(),
+          ),
+          validator: (value) {
+            final text = value?.trim() ?? '';
+            if (text.isEmpty) return 'Enter a username';
+            if (text.length < 3) return 'At least 3 characters';
+            return null;
+          },
+          onFieldSubmitted: (_) => _save(),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(onPressed: _save, child: const Text('Save')),
+      ],
     );
   }
 }
